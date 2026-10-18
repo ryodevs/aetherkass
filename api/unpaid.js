@@ -3,8 +3,8 @@ import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import path from 'path';
 
 // Vercel tidak punya font sistem: taruh Inter-Regular.ttf & Inter-Bold.ttf di /fonts
-GlobalFonts.registerFromPath(path.join(process.cwd(), 'fonts/Inter-Regular.ttf'), 'Inter');
-GlobalFonts.registerFromPath(path.join(process.cwd(), 'fonts/Inter-Bold.ttf'), 'InterBold');
+GlobalFonts.registerFromPath(path.join(process.cwd(), 'fonts/Inter_18pt-Regular.ttf'), 'Inter');
+GlobalFonts.registerFromPath(path.join(process.cwd(), 'fonts/Inter_18pt-Bold.ttf'), 'InterBold');
 
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const rp = n => 'Rp' + n.toLocaleString('id-ID');
