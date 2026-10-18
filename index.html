@@ -81,10 +81,10 @@ let S = { g: null, members: [], periods: [], paid: new Set(), txs: [], pid: null
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 2800); }
 let busyN = 0;
 function busy(d) { busyN += d; $('#overlay').hidden = busyN <= 0; }
-async function run(q) {
-  busy(1);
+async function run(q, quiet) {
+  if (!quiet) busy(1);
   try { const { data, error } = await q; if (error) { toast('Gagal: ' + error.message); throw error; } return data; }
-  finally { busy(-1); }
+  finally { if (!quiet) busy(-1); }
 }
 
 async function load() { busy(1); try { await loadData(); } finally { busy(-1); } }
@@ -157,8 +157,8 @@ function kasView() {
 const actions = {
   async toggle(el) {
     const k = S.pid + ':' + el.dataset.id;
-    if (S.paid.has(k)) { await run(sb.from('payments').delete().match({ period_id: S.pid, member_id: el.dataset.id })); S.paid.delete(k); }
-    else { await run(sb.from('payments').insert({ group_id: S.g.id, period_id: S.pid, member_id: el.dataset.id })); S.paid.add(k); }
+    if (S.paid.has(k)) { await run(sb.from('payments').delete().match({ period_id: S.pid, member_id: el.dataset.id }), true); S.paid.delete(k); }
+    else { await run(sb.from('payments').insert({ group_id: S.g.id, period_id: S.pid, member_id: el.dataset.id }), true); S.paid.add(k); }
     render();
   },
   async addPeriod() {
