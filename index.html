@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kas AetherCode1A</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EEF2F1;--ink:#14212B;--mute:#5B6B76;--line:#CBD6D3;--card:#fff;--acc:#0E5E6F;--ok:#2E7D4F;--warn:#B7791F;--bad:#B3382C}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 'Bricolage Grotesque',system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 80px}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{margin:0;font-size:1.1rem;font-weight:600}
+.saldo{margin:18px 0 6px;font-size:clamp(2.6rem,12vw,4rem);font-weight:800;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.sub{color:var(--mute);margin:0 0 20px}
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line);margin-bottom:16px}
+.tabs button{background:none;border:0;padding:10px 14px;font-weight:600;color:var(--mute);border-bottom:3px solid transparent;margin-bottom:-2px;cursor:pointer}
+.tabs button[aria-selected=true]{color:var(--acc);border-color:var(--acc)}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--acc);border:1.5px solid var(--acc)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+input,select,textarea{background:var(--card);border:1.5px solid var(--line);border-radius:8px;padding:9px 11px;min-width:0}
+.grow{flex:1}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.chip{border-radius:99px;padding:4px 12px;font-size:.85rem;font-weight:600;border:1.5px solid var(--line);background:var(--card);color:var(--mute)}
+.chip.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+button.chip{cursor:pointer}
+.in{color:var(--ok)}.out{color:var(--bad)}
+.amt{font-variant-numeric:tabular-nums;font-weight:600}
+.empty{color:var(--mute);padding:20px 0}
+dialog{border:0;border-radius:12px;padding:20px;width:min(92vw,360px)}
+dialog form{display:grid;gap:10px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;display:none}
+</style>
+</head>
+<body>
+<main>
+  <header><h1 id="gname">Kas kelas</h1><button class="btn ghost" id="auth"></button></header>
+  <div class="saldo" id="saldo">Rp0</div>
+  <p class="sub" id="sub">Memuat data…</p>
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tab="iuran" aria-selected="true">Iuran</button>
+    <button role="tab" data-tab="kas" aria-selected="false">Kas masuk &amp; keluar</button>
+  </div>
+  <section id="view"></section>
+</main>
+
+<dialog id="login"><form method="dialog" id="loginForm">
+  <strong>Masuk sebagai bendahara</strong>
+  <input id="em" type="email" placeholder="Email" autocomplete="username" required>
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password" required>
+  <button class="btn">Masuk</button>
+</form></dialog>
+<div id="toast" role="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const SUPABASE_URL = 'ISI_URL_SUPABASE';
+const SUPABASE_ANON_KEY = 'ISI_ANON_KEY';
+const SLUG = 'aethercode1a';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = s => document.querySelector(s);
+const rp = n => (n < 0 ? '-' : '') + 'Rp' + Math.abs(n).toLocaleString('id-ID');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let S = { g: null, members: [], periods: [], paid: new Set(), txs: [], pid: null, owner: false, tab: 'iuran' };
+
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 2800); }
+async function run(q) { const { data, error } = await q; if (error) { toast('Gagal: ' + error.message); throw error; } return data; }
+
+async function load() {
+  const { data: { session } } = await sb.auth.getSession();
+  const { data: g } = await sb.from('groups').select('*').eq('public_slug', SLUG).single();
+  if (!g) { $('#sub').textContent = 'Kelas tidak ditemukan. Cek schema.sql dan SLUG.'; return; }
+  S.g = g; S.owner = !!session && session.user.id === g.owner_id;
+  const [m, p, pay, t] = await Promise.all([
+    sb.from('members').select('*').eq('group_id', g.id).order('name'),
+    sb.from('periods').select('*').eq('group_id', g.id).order('created_at'),
+    sb.from('payments').select('period_id,member_id').eq('group_id', g.id),
+    sb.from('transactions').select('*').eq('group_id', g.id).order('created_at', { ascending: false }),
+  ]);
+  S.members = m.data || []; S.periods = p.data || []; S.txs = t.data || [];
+  S.paid = new Set((pay.data || []).map(x => x.period_id + ':' + x.member_id));
+  if (!S.periods.find(x => x.id === S.pid)) S.pid = S.periods.at(-1)?.id || null;
+  render();
+}
+
+function saldo() {
+  const iuran = S.periods.reduce((s, p) => s + p.amount * S.members.filter(m => S.paid.has(p.id + ':' + m.id)).length, 0);
+  const tx = S.txs.reduce((s, t) => s + (t.type === 'in' ? t.amount : -t.amount), 0);
+  return { iuran, total: iuran + tx };
+}
+
+function render() {
+  $('#gname').textContent = 'Kas ' + S.g.name;
+  $('#auth').textContent = S.owner ? 'Keluar' : 'Masuk bendahara';
+  const sd = saldo();
+  $('#saldo').textContent = rp(sd.total);
+  $('#sub').textContent = `Saldo kas. Iuran terkumpul ${rp(sd.iuran)}` + (S.owner ? ' · mode bendahara' : '');
+  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === S.tab));
+  $('#view').innerHTML = S.tab === 'iuran' ? iuranView() : kasView();
+}
+
+function iuranView() {
+  const p = S.periods.find(x => x.id === S.pid);
+  const owner = S.owner;
+  const lunas = p ? S.members.filter(m => S.paid.has(p.id + ':' + m.id)).length : 0;
+  let h = '';
+  if (S.periods.length) {
+    h += `<div class="row"><select id="psel" class="grow" aria-label="Periode">${S.periods.map(x => `<option value="${x.id}" ${x.id === S.pid ? 'selected' : ''}>${esc(x.label)} (${rp(x.amount)})</option>`).join('')}</select></div>`;
+    h += `<p class="sub">${lunas} dari ${S.members.length} anggota sudah lunas.</p>`;
+  } else h += `<p class="empty">Belum ada periode iuran.${owner ? ' Tambahkan di bawah.' : ''}</p>`;
+  if (owner && p) h += `<div class="row"><button class="btn" data-a="rekap1">Unduh PNG belum bayar</button><button class="btn ghost" data-a="rekapAll">PNG semua tunggakan</button></div>`;
+  h += '<ul>' + S.members.map(m => {
+    const ok = p && S.paid.has(p.id + ':' + m.id);
+    const chip = owner && p ? `<button class="chip ${ok ? 'ok' : ''}" data-a="toggle" data-id="${m.id}">${ok ? 'Lunas' : 'Belum'}</button>` : `<span class="chip ${ok ? 'ok' : ''}">${ok ? 'Lunas' : 'Belum'}</span>`;
+    return `<li><span>${esc(m.name)}</span>${chip}</li>`;
+  }).join('') + '</ul>';
+  if (!S.members.length) h += `<p class="empty">Belum ada anggota.</p>`;
+  if (owner) h += `
+    <h2 style="font-size:1rem;margin:28px 0 8px">Tambah periode</h2>
+    <div class="row"><input id="plabel" class="grow" placeholder="Contoh: Minggu 1 Oktober"><input id="pamt" type="number" min="1" placeholder="Nominal" style="width:120px"><button class="btn" data-a="addPeriod">Tambah</button></div>
+    <h2 style="font-size:1rem;margin:20px 0 8px">Tambah anggota</h2>
+    <textarea id="mnames" rows="4" style="width:100%" placeholder="Satu nama per baris"></textarea>
+    <div class="row" style="margin-top:8px"><button class="btn" data-a="addMembers">Simpan anggota</button></div>`;
+  return h;
+}
+
+function kasView() {
+  let h = '';
+  if (S.owner) h += `<div class="row"><select id="ttype"><option value="in">Masuk</option><option value="out">Keluar</option></select><input id="tamt" type="number" min="1" placeholder="Nominal" style="width:120px"><input id="tnote" class="grow" placeholder="Keterangan"><button class="btn" data-a="addTx">Catat</button></div>`;
+  h += S.txs.length ? '<ul>' + S.txs.map(t => `<li><span>${esc(t.note || '-')}<br><small style="color:var(--mute)">${new Date(t.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</small></span><span class="amt ${t.type}">${t.type === 'in' ? '+' : '-'}${rp(t.amount)}</span></li>`).join('') + '</ul>'
+    : '<p class="empty">Belum ada transaksi di luar iuran.</p>';
+  return h;
+}
+
+const actions = {
+  async toggle(el) {
+    const k = S.pid + ':' + el.dataset.id;
+    if (S.paid.has(k)) { await run(sb.from('payments').delete().match({ period_id: S.pid, member_id: el.dataset.id })); S.paid.delete(k); }
+    else { await run(sb.from('payments').insert({ group_id: S.g.id, period_id: S.pid, member_id: el.dataset.id })); S.paid.add(k); }
+    render();
+  },
+  async addPeriod() {
+    const label = $('#plabel').value.trim(), amount = +$('#pamt').value;
+    if (!label || amount < 1) return toast('Isi nama periode dan nominal');
+    await run(sb.from('periods').insert({ group_id: S.g.id, label, amount })); load();
+  },
+  async addMembers() {
+    const rows = $('#mnames').value.split('\n').map(s => s.trim()).filter(Boolean).map(name => ({ group_id: S.g.id, name }));
+    if (!rows.length) return toast('Isi minimal satu nama');
+    await run(sb.from('members').insert(rows)); load();
+  },
+  async addTx() {
+    const amount = +$('#tamt').value, note = $('#tnote').value.trim();
+    if (amount < 1 || !note) return toast('Isi nominal dan keterangan');
+    await run(sb.from('transactions').insert({ group_id: S.g.id, type: $('#ttype').value, amount, note })); load();
+  },
+  rekap1: () => rekap(false),
+  rekapAll: () => rekap(true),
+};
+
+async function rekap(all) {
+  const { data: { session } } = await sb.auth.getSession();
+  const r = await fetch(`/api/unpaid?group=${S.g.id}${all ? '' : '&period=' + S.pid}`, { headers: { Authorization: 'Bearer ' + session.access_token } });
+  if (!r.ok) return toast('Gagal membuat PNG');
+  if ((r.headers.get('content-type') || '').includes('json')) return toast((await r.json()).message);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await r.blob()); a.download = 'tunggakan-kas.png'; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+document.addEventListener('click', e => {
+  const tab = e.target.closest('[data-tab]'); if (tab) { S.tab = tab.dataset.tab; return render(); }
+  const el = e.target.closest('[data-a]'); if (el) actions[el.dataset.a](el);
+});
+document.addEventListener('change', e => { if (e.target.id === 'psel') { S.pid = e.target.value; render(); } });
+$('#auth').onclick = async () => { if (S.owner) { await sb.auth.signOut(); load(); } else $('#login').showModal(); };
+$('#loginForm').onsubmit = async () => {
+  const { error } = await sb.auth.signInWithPassword({ email: $('#em').value, password: $('#pw').value });
+  error ? toast('Email atau password salah') : load();
+};
+load();
+</script>
+</body>
+</html>
