@@ -1,0 +1,5 @@
+{
+  "functions": {
+    "api/unpaid.js": { "includeFiles": "fonts/**" }
+  }
+}
