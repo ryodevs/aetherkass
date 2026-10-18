@@ -1,0 +1,9 @@
+{
+  "name": "kas-aethercode1a",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.65",
+    "@supabase/supabase-js": "^2.45.4"
+  }
+}
