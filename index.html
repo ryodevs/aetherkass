@@ -35,7 +35,14 @@ button.chip{cursor:pointer}
 .empty{color:var(--mute);padding:20px 0}
 dialog{border:0;border-radius:12px;padding:20px;width:min(92vw,360px)}
 dialog form{display:grid;gap:10px}
-#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;display:none}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;display:none;z-index:20}
+.overlay{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(238,242,241,.85)}
+.overlay[hidden]{display:none}
+.loader{--color-1:var(--acc);--size:1px;width:calc(48*var(--size));height:calc(48*var(--size));display:inline-block;position:relative}
+.loader::after,.loader::before{content:'';box-sizing:border-box;width:calc(48*var(--size));height:calc(48*var(--size));border-radius:50%;border:calc(2*var(--size)) solid var(--color-1);position:absolute;left:0;top:0;animation:animloader 2s linear infinite}
+.loader::after{animation-delay:1s}
+@keyframes animloader{0%{transform:scale(0);opacity:1}100%{transform:scale(1);opacity:0}}
+@media (prefers-reduced-motion:reduce){.loader::after,.loader::before{animation-duration:6s}}
 </style>
 </head>
 <body>
@@ -57,6 +64,7 @@ dialog form{display:grid;gap:10px}
   <button class="btn">Masuk</button>
 </form></dialog>
 <div id="toast" role="status"></div>
+<div id="overlay" class="overlay" role="status" aria-label="Memuat"><span class="loader"></span></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
@@ -71,9 +79,16 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 let S = { g: null, members: [], periods: [], paid: new Set(), txs: [], pid: null, owner: false, tab: 'iuran' };
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 2800); }
-async function run(q) { const { data, error } = await q; if (error) { toast('Gagal: ' + error.message); throw error; } return data; }
+let busyN = 0;
+function busy(d) { busyN += d; $('#overlay').hidden = busyN <= 0; }
+async function run(q) {
+  busy(1);
+  try { const { data, error } = await q; if (error) { toast('Gagal: ' + error.message); throw error; } return data; }
+  finally { busy(-1); }
+}
 
-async function load() {
+async function load() { busy(1); try { await loadData(); } finally { busy(-1); } }
+async function loadData() {
   const { data: { session } } = await sb.auth.getSession();
   const { data: g } = await sb.from('groups').select('*').eq('public_slug', SLUG).single();
   if (!g) { $('#sub').textContent = 'Kelas tidak ditemukan. Cek schema.sql dan SLUG.'; return; }
@@ -165,7 +180,8 @@ const actions = {
   rekapAll: () => rekap(true),
 };
 
-async function rekap(all) {
+async function rekap(all) { busy(1); try { await rekapRun(all); } finally { busy(-1); } }
+async function rekapRun(all) {
   const { data: { session } } = await sb.auth.getSession();
   const r = await fetch(`/api/unpaid?group=${S.g.id}${all ? '' : '&period=' + S.pid}`, { headers: { Authorization: 'Bearer ' + session.access_token } });
   if (!r.ok) return toast('Gagal membuat PNG');
