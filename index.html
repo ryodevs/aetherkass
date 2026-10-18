@@ -43,13 +43,41 @@ dialog form{display:grid;gap:10px}
 .loader::after{animation-delay:1s}
 @keyframes animloader{0%{transform:scale(0);opacity:1}100%{transform:scale(1);opacity:0}}
 @media (prefers-reduced-motion:reduce){.loader::after,.loader::before{animation-duration:6s}}
+/* tanpa highlight biru saat tap/klik (outline keyboard tetap ada) */
+*{-webkit-tap-highlight-color:transparent}
+button,.chip,li,.tabs{-webkit-user-select:none;user-select:none;touch-action:manipulation}
+:focus{outline:none}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+/* kartu saldo */
+.hero{background:var(--acc);color:#fff;border-radius:24px;padding:22px 20px;margin:16px 0 18px}
+.hero .saldo{margin:0}
+.hero .sub{color:rgba(255,255,255,.82);margin:8px 0 16px}
+.bar{height:8px;background:rgba(255,255,255,.25);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:#fff;border-radius:99px;transition:width .6s cubic-bezier(.2,.8,.2,1)}
+/* tab pill */
+.tabs{border:0;background:#DCE5E3;border-radius:99px;padding:4px;gap:4px}
+.tabs button{flex:1;border:0;margin:0;border-radius:99px;transition:background .2s,color .2s,box-shadow .2s}
+.tabs button[aria-selected=true]{background:#fff;color:var(--acc);box-shadow:0 1px 5px rgba(20,33,43,.15)}
+/* respons klik */
+.btn{transition:transform .12s,filter .15s}
+.btn:hover{filter:brightness(1.1)}
+.btn:active,button.chip:active{transform:scale(.93)}
+.chip{transition:background .2s,color .2s,border-color .2s,transform .12s}
+li{border-radius:12px;padding-left:10px;padding-right:10px;transition:background .15s}
+li:active{background:rgba(14,94,111,.08)}
+.pop{animation:pop .38s cubic-bezier(.3,1.6,.5,1)}
+@keyframes pop{0%{transform:scale(.8)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.pop{animation:none}.bar i{transition:none}}
 </style>
 </head>
 <body>
 <main>
   <header><h1 id="gname">Kas kelas</h1><button class="btn ghost" id="auth"></button></header>
-  <div class="saldo" id="saldo">Rp0</div>
-  <p class="sub" id="sub">Memuat data…</p>
+  <div class="hero">
+    <div class="saldo" id="saldo">Rp0</div>
+    <p class="sub" id="sub">Memuat data…</p>
+    <div class="bar" aria-hidden="true"><i id="barfill"></i></div>
+  </div>
   <div class="tabs" role="tablist">
     <button role="tab" data-tab="iuran" aria-selected="true">Iuran</button>
     <button role="tab" data-tab="kas" aria-selected="false">Kas masuk &amp; keluar</button>
@@ -105,6 +133,18 @@ async function loadData() {
   render();
 }
 
+let shown = 0, cnt = 0;
+function countTo(to) {
+  const el = $('#saldo'), from = shown, id = ++cnt, t0 = performance.now();
+  if (matchMedia('(prefers-reduced-motion:reduce)').matches || from === to) { shown = to; el.textContent = rp(to); return; }
+  (function f(t) {
+    if (id !== cnt) return;
+    const k = Math.min(1, (t - t0) / 700), e = 1 - Math.pow(1 - k, 3);
+    shown = Math.round(from + (to - from) * e); el.textContent = rp(shown);
+    if (k < 1) requestAnimationFrame(f);
+  })(t0);
+}
+
 function saldo() {
   const iuran = S.periods.reduce((s, p) => s + p.amount * S.members.filter(m => S.paid.has(p.id + ':' + m.id)).length, 0);
   const tx = S.txs.reduce((s, t) => s + (t.type === 'in' ? t.amount : -t.amount), 0);
@@ -115,7 +155,9 @@ function render() {
   $('#gname').textContent = 'Kas ' + S.g.name;
   $('#auth').textContent = S.owner ? 'Keluar' : 'Masuk bendahara';
   const sd = saldo();
-  $('#saldo').textContent = rp(sd.total);
+  countTo(sd.total);
+  const cp = S.periods.find(x => x.id === S.pid);
+  $('#barfill').style.width = (cp && S.members.length ? Math.round(S.members.filter(m => S.paid.has(cp.id + ':' + m.id)).length / S.members.length * 100) : 0) + '%';
   $('#sub').textContent = `Saldo kas. Iuran terkumpul ${rp(sd.iuran)}` + (S.owner ? ' · mode bendahara' : '');
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === S.tab));
   $('#view').innerHTML = S.tab === 'iuran' ? iuranView() : kasView();
@@ -156,10 +198,14 @@ function kasView() {
 
 const actions = {
   async toggle(el) {
-    const k = S.pid + ':' + el.dataset.id;
-    if (S.paid.has(k)) { await run(sb.from('payments').delete().match({ period_id: S.pid, member_id: el.dataset.id }), true); S.paid.delete(k); }
-    else { await run(sb.from('payments').insert({ group_id: S.g.id, period_id: S.pid, member_id: el.dataset.id }), true); S.paid.add(k); }
+    const id = el.dataset.id, pid = S.pid, k = pid + ':' + id, was = S.paid.has(k);
+    was ? S.paid.delete(k) : S.paid.add(k);
     render();
+    document.querySelector(`[data-id="${id}"]`)?.classList.add('pop');
+    try {
+      await run(was ? sb.from('payments').delete().match({ period_id: pid, member_id: id })
+                    : sb.from('payments').insert({ group_id: S.g.id, period_id: pid, member_id: id }), true);
+    } catch { was ? S.paid.add(k) : S.paid.delete(k); render(); }
   },
   async addPeriod() {
     const label = $('#plabel').value.trim(), amount = +$('#pamt').value;
